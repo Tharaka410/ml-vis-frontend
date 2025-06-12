@@ -82,7 +82,7 @@ export default function LogisticRegressionPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://127.0.0.1:8000/logistic-regression/train-history", {
+      const response = await fetch("${process.env.NEXT_PUBLIC_API_URL}/logistic-regression/train-history", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -116,7 +116,7 @@ export default function LogisticRegressionPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://127.0.0.1:8000/logistic-regression/data", {
+      const response = await fetch("${process.env.NEXT_PUBLIC_API_URL}/logistic-regression/data", {
         method: "GET", // Changed to GET as no body is needed for synthetic data
         headers: {
           "Content-Type": "application/json",

@@ -70,8 +70,7 @@ export default function LinearRegressionPage() {
       const y_data = newPoints.map(p => p.y);
 
       try {
-        // Fetch final model parameters from scikit-learn (true solution)
-        const finalResponse = await fetch("http://localhost:8000/linear-regression", {
+        const finalResponse = await fetch("${process.env.NEXT_PUBLIC_API_URL}/linear-regression", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ X: X_data, y: y_data }),
@@ -88,7 +87,7 @@ export default function LinearRegressionPage() {
         }
 
         // Fetch simulated history for animation and error graph
-        const historyResponse = await fetch("http://localhost:8000/linear-regression-history", {
+        const historyResponse = await fetch("${process.env.NEXT_PUBLIC_API_URL}/linear-regression-history", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ X: X_data, y: y_data, iterations: params.iterations }),
@@ -119,8 +118,7 @@ export default function LinearRegressionPage() {
 
     const animate = () => {
       setCurrentAnimationFrame(prev => {
-        // Stop animation if we've reached the total iterations
-        if (prev >= params.iterations -1) { // Adjusted to params.iterations - 1 to cover all steps up to the last index
+        if (prev >= params.iterations -1) { 
           setIsAnimating(false);
           return prev;
         }
@@ -132,8 +130,8 @@ export default function LinearRegressionPage() {
     if (isAnimating && simulatedMseHistory.length > 0) { // Only start if history is loaded
       animationId = requestAnimationFrame(animate);
     } else {
-      if (reqRef.current !== null) cancelAnimationFrame(reqRef.current); // Use reqRef for cancel
-      reqRef.current = null; // Clear the ref
+      if (reqRef.current !== null) cancelAnimationFrame(reqRef.current); 
+      reqRef.current = null; 
     }
 
     // Cleanup function

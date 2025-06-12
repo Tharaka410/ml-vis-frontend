@@ -92,7 +92,7 @@ export default function PerceptronVisualizer() {
   const initializeNetwork = useCallback(async (currentConfig: typeof config) => {
     setIsNetworkInitialized(false);
     try {
-        const response = await fetch(`${BASE_URL}/initialize`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/initialize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

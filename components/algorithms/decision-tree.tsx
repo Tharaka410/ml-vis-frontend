@@ -53,7 +53,7 @@ const DecisionTreeVisualizer = () => {
  useEffect(() => {
   if (!selectedDataset) return;
 
-  fetch("http://localhost:8000/build_tree", {
+  fetch("${process.env.NEXT_PUBLIC_API_URL}/build_tree", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
