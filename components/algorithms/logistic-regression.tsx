@@ -3,9 +3,13 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import "katex/dist/katex.min.css";
 import { BlockMath } from "react-katex";
-import Plotly from "plotly.js-dist"; // Import Plotly.js
+import dynamic from "next/dynamic"; 
+import { ScatterData } from "plotly.js";
+const DynamicPlotlyGraph = dynamic(() => import("./plotlygraph"), {
+  ssr: false, 
+  loading: () => <p className="text-blue-400">Loading chart...</p>, 
+});
 
-// Define types for backend responses
 interface LogisticRegressionDataResponse {
   X: number[][];
   y: number[];
@@ -35,15 +39,12 @@ export default function LogisticRegressionPage() {
   const [isAnimating, setIsAnimating] = useState(false);
   const [frame, setFrame] = useState(0);
   const reqRef = useRef<number | null>(null);
-
-  // Add isLoading and error states
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Refs for Plotly div elements
-  const mainPlotRef = useRef<HTMLDivElement>(null); // For data points and decision boundary
-  const lossPlotRef = useRef<HTMLDivElement>(null); // For loss history
-  const sigmoidPlotRef = useRef<HTMLDivElement>(null); // For sigmoid curve
+  const mainPlotRef = useRef<HTMLDivElement | null>(null);
+  const lossPlotRef = useRef<HTMLDivElement | null>(null);
+  const sigmoidPlotRef = useRef<HTMLDivElement | null>(null);
 
   const [dataX, setDataX] = useState<number[][]>([]);
   const [dataY, setDataY] = useState<number[]>([]);
@@ -60,8 +61,8 @@ export default function LogisticRegressionPage() {
     min: number;
     max: number;
     step: number;
-    type?: 'range' | 'select'; // Add 'type' to differentiate controls
-    options?: { value: any; label: string }[]; // Options for select type
+    type?: 'range' | 'select'; 
+    options?: { value: any; label: string }[];
   }[] = [
     { name: "learningRate", label: "Learning Rate", min: 0.01, max: 0.5, step: 0.01, type: 'range' },
     { name: "iterations", label: "Iterations", min: 10, max: 200, step: 10, type: 'range' },
@@ -168,7 +169,7 @@ export default function LogisticRegressionPage() {
           return prevFrame + 1;
         } else {
           setIsAnimating(false);
-          return prevFrame; // Stay at the last frame
+          return prevFrame; 
         }
       });
     };
@@ -184,23 +185,19 @@ export default function LogisticRegressionPage() {
 
 
   // --- EFFECT FOR MAIN DATA VISUALIZATION (2D Plotly) ---
-  useEffect(() => {
-    if (!dataX.length || !dataY.length || !weightsHistory.length || !mainPlotRef.current) {
-      return;
+  const mainPlotData: Plotly.Data[] = React.useMemo(() => {
+    if (!dataX.length || !dataY.length || !weightsHistory.length) {
+      return [];
     }
 
     const currentWeights = weightsHistory[frame] || weightsHistory[weightsHistory.length - 1];
-    if (!currentWeights || currentWeights.length < 3) { // Expect 2 weights and 1 bias
+    if (!currentWeights || currentWeights.length < 3) {
         console.warn("Current weights or number of features is invalid for plotting.");
-        return;
+        return [];
     }
     const weights = currentWeights.slice(0, 2); // w1, w2
     const bias = currentWeights[2]; // bias
 
-    let plotData: Plotly.Data[] = [];
-    let layout: Partial<Plotly.Layout> = {};
-
-    // 2D Plotting logic
     const x_min = Math.min(...dataX.map(d => d[0]));
     const x_max = Math.max(...dataX.map(d => d[0]));
 
@@ -210,12 +207,10 @@ export default function LogisticRegressionPage() {
     if (weights[1] !== 0) {
       y1_line = x1_line.map(x => (-weights[0] * x - bias) / weights[1]);
     } else if (weights[0] !== 0) {
-      // Vertical line if w2 is zero, x1 = -bias / w1
       y1_line = [Math.min(...dataX.map(d => d[1])), Math.max(...dataX.map(d => d[1]))];
       x1_line[0] = -bias / weights[0];
       x1_line[1] = -bias / weights[0];
     } else {
-      // No clear boundary if both weights are zero
       y1_line = [0, 0];
     }
 
@@ -246,76 +241,67 @@ export default function LogisticRegressionPage() {
       line: { color: 'green', width: 2 },
     };
 
-    plotData = [trace0, trace1, decisionBoundaryTrace];
+    return [trace0, trace1, decisionBoundaryTrace] as Plotly.Data[];
+  }, [dataX, dataY, featureNames, weightsHistory, frame]); // Dependencies for data calculation
 
-    layout = {
-      title: `Logistic Regression (Frame: ${frame}/${params.iterations})`,
-      xaxis: { title: featureNames[0] || 'Feature 1' },
-      yaxis: { title: featureNames[1] || 'Feature 2' },
-      hovermode: 'closest',
-      height: 400, // Fixed height from original canvas
-      margin: { t: 50, b: 50, l: 50, r: 50 },
-      paper_bgcolor: "black",
-      plot_bgcolor: "black",
-      font: { color: "white" },
-    };
-
-    Plotly.newPlot(mainPlotRef.current, plotData, layout);
-
-  }, [dataX, dataY, featureNames, weightsHistory, frame, params.iterations]);
+  const mainPlotLayout = React.useMemo(() => ({
+    title: `Logistic Regression (Frame: <span class="math-inline">\{frame\}/</span>{params.iterations})`,
+    xaxis: { title: featureNames[0] || 'Feature 1' },
+    yaxis: { title: featureNames[1] || 'Feature 2' },
+    hovermode: 'closest',
+    height: 400,
+    margin: { t: 50, b: 50, l: 50, r: 50 },
+    paper_bgcolor: "black",
+    plot_bgcolor: "black",
+    font: { color: "white" },
+  })as Partial<Plotly.Layout>, [frame, params.iterations, featureNames]); 
 
 
-  // --- EFFECT FOR LOSS HISTORY PLOT ---
-  useEffect(() => {
-    if (!lossHistory.length || !lossPlotRef.current) {
-      return;
+  // Data for Loss Plot
+  const lossPlotData: Plotly.Data[] = React.useMemo(() => {
+    if (!lossHistory.length) {
+      return [];
     }
-
-    const traceLoss = {
+    return [{
       x: Array.from({ length: lossHistory.length }, (_, i) => i + 1),
       y: lossHistory,
       mode: 'lines',
       type: 'scatter',
       name: 'Loss',
       line: { color: 'purple' },
-    };
-
-    const layoutLoss = {
-      title: 'Loss History',
-      xaxis: { title: 'Iteration' },
-      yaxis: { title: 'Loss' },
-      height: 250, // Fixed height from original canvas
-      margin: { t: 50, b: 50, l: 50, r: 50 },
-      paper_bgcolor: "black",
-      plot_bgcolor: "black",
-      font: { color: "white" },
-    };
-
-    Plotly.newPlot(lossPlotRef.current, [traceLoss] as Plotly.Data[], layoutLoss);
-
+    }];
   }, [lossHistory]);
 
-  // --- EFFECT FOR SIGMOID CURVE PLOT ---
-  useEffect(() => {
-    if (!dataX.length || !dataY.length || !weightsHistory.length || !sigmoidPlotRef.current) {
-      return;
+  const lossPlotLayout = React.useMemo(() => ({
+    title: { text: 'Loss History' },
+    xaxis: { title: 'Iteration' },
+    yaxis: { title: 'Loss' },
+    height: 250,
+    margin: { t: 50, b: 50, l: 50, r: 50 },
+    paper_bgcolor: "black",
+    plot_bgcolor: "black",
+    font: { color: "white" },
+  }) as Partial<Plotly.Layout>, []);
+
+
+  // Data for Sigmoid Plot
+  const sigmoidPlotData = React.useMemo(() => {
+    if (!dataX.length || !dataY.length || !weightsHistory.length) {
+      return [];
     }
 
     const currentWeights = weightsHistory[frame] || weightsHistory[weightsHistory.length - 1];
     if (!currentWeights || currentWeights.length < 3) {
         console.warn("Current weights or number of features is invalid for sigmoid plotting.");
-        return;
+        return [];
     }
     const weights = currentWeights.slice(0, 2); // w1, w2
     const bias = currentWeights[2]; // bias
 
-    // Calculate z for each data point
     const linearOutputs = dataX.map(d => weights[0] * d[0] + weights[1] * d[1] + bias);
-    // Calculate predicted probabilities
     const predictedProbs = linearOutputs.map(z => 1 / (1 + Math.exp(-z)));
 
-    // Generate points for the sigmoid curve itself
-    const z_range = Array.from({ length: 100 }, (_, i) => -10 + (i * 20 / 99)); // From -10 to 10
+    const z_range = Array.from({ length: 100 }, (_, i) => -10 + (i * 20 / 99));
     const sigmoid_curve_y = z_range.map(z => 1 / (1 + Math.exp(-z)));
 
     const traceSigmoidPoints0 = {
@@ -346,29 +332,28 @@ export default function LogisticRegressionPage() {
     };
 
     const decisionBoundaryLine = {
-      x: [0, 0], // Where z = 0
-      y: [0, 1], // Probabilities from 0 to 1
+      x: [0, 0],
+      y: [0, 1],
       mode: 'lines',
       type: 'scatter',
       name: 'Decision Threshold (Z=0)',
       line: { color: 'green', dash: 'dash', width: 2 },
     };
 
-    const layoutSigmoid = {
-      title: `Sigmoid Curve (Frame: ${frame}/${params.iterations})`,
-      xaxis: { title: 'Linear Output (z = w · x + b)' },
-      yaxis: { title: 'Predicted Probability σ(z)', range: [0, 1] },
-      hovermode: 'closest',
-      height: 350,
-      margin: { t: 50, b: 50, l: 50, r: 50 },
-      paper_bgcolor: "black",
-      plot_bgcolor: "black",
-      font: { color: "white" },
-    };
+    return [traceSigmoidPoints0, traceSigmoidPoints1, sigmoidCurveTrace, decisionBoundaryLine] as Plotly.Data[];
+  }, [dataX, dataY, weightsHistory, frame]);
 
-    Plotly.newPlot(sigmoidPlotRef.current, [traceSigmoidPoints0, traceSigmoidPoints1, sigmoidCurveTrace, decisionBoundaryLine] as Plotly.Data[], layoutSigmoid);
-
-  }, [dataX, dataY, weightsHistory, frame, params.iterations]);
+  const sigmoidPlotLayout = React.useMemo(() => ({
+    title: { text: `Sigmoid Curve (Frame: ${frame}/${params.iterations})` }, // Corrected title type
+    xaxis: { title: { text: 'Linear Output (z = w · x + b)' } }, // Corrected title type
+    yaxis: { title: { text: 'Predicted Probability σ(z)' }, range: [0, 1] },
+    hovermode: 'closest',
+    height: 350,
+    margin: { t: 50, b: 50, l: 50, r: 50 },
+    paper_bgcolor: "black",
+    plot_bgcolor: "black",
+    font: { color: "white" },
+  })as Partial<Plotly.Layout>, [frame, params.iterations]);
 
 
   return (
@@ -389,28 +374,38 @@ export default function LogisticRegressionPage() {
           {/* Data Points & Decision Boundary Plotly Div */}
           <div className="relative h-[400px] border border-gray-700 rounded-lg overflow-hidden bg-gray-800">
             <h3 className="text-lg font-semibold mb-2 p-2">Data Points & Decision Boundary ({featureNames[0] || 'Feature 1'} vs {featureNames[1] || 'Feature 2'})</h3>
-            <div
-              ref={mainPlotRef}
-              className="w-full h-full" // Plotly will size itself within this div
-            />
+            {/* Use the dynamic component here */}
+            {dataX.length > 0 && dataY.length > 0 && weightsHistory.length > 0 && (
+              <DynamicPlotlyGraph
+                divRef={mainPlotRef}
+                plotData={mainPlotData}
+                layout={mainPlotLayout}
+              />
+            )}
           </div>
 
           {/* Sigmoid Curve Plotly Div */}
           <div className="relative h-[350px] border border-gray-700 rounded-lg overflow-hidden bg-gray-800">
             <h3 className="text-lg font-semibold mb-2 p-2">Predicted Probability vs. Linear Output (Sigmoid)</h3>
-            <div
-              ref={sigmoidPlotRef}
-              className="w-full h-full"
-            />
+            {dataX.length > 0 && dataY.length > 0 && weightsHistory.length > 0 && (
+              <DynamicPlotlyGraph
+                divRef={sigmoidPlotRef}
+                plotData={sigmoidPlotData}
+                layout={sigmoidPlotLayout}
+              />
+            )}
           </div>
 
           {/* Loss Graph Plotly Div */}
           <div className="relative h-[250px] border border-gray-700 rounded-lg overflow-hidden bg-gray-800">
             <h3 className="text-lg font-semibold mb-2 p-2">Classification Error (Binary Cross-Entropy Loss)</h3>
-            <div
-              ref={lossPlotRef}
-              className="w-full h-full" // Plotly will size itself within this div
-            />
+            {lossHistory.length > 0 && (
+              <DynamicPlotlyGraph
+                divRef={lossPlotRef}
+                plotData={lossPlotData}
+                layout={lossPlotLayout}
+              />
+            )}
           </div>
 
           {/* Animation & Progress Controls */}
