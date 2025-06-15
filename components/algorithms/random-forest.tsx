@@ -250,7 +250,7 @@ export default function RandomForestPage() {
 
 useEffect(() => {
   console.log("Sending forest fetch request...");
-  fetch("${process.env.NEXT_PUBLIC_API_URL}/build_forest", {
+  fetch(`${process.env.NEXT_PUBLIC_API_URL}/build_forest`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -330,7 +330,7 @@ useEffect(() => {
     });
 
     try {
-      const response = await fetch("${process.env.NEXT_PUBLIC_API_URL}/predict_forest", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/predict_forest`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -70,7 +70,7 @@ export default function LinearRegressionPage() {
       const y_data = newPoints.map(p => p.y);
 
       try {
-        const finalResponse = await fetch("${process.env.NEXT_PUBLIC_API_URL}/linear-regression", {
+        const finalResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/linear-regression`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ X: X_data, y: y_data }),
@@ -87,7 +87,7 @@ export default function LinearRegressionPage() {
         }
 
         // Fetch simulated history for animation and error graph
-        const historyResponse = await fetch("${process.env.NEXT_PUBLIC_API_URL}/linear-regression-history", {
+        const historyResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/linear-regression-history`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ X: X_data, y: y_data, iterations: params.iterations }),

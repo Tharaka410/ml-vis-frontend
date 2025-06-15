@@ -62,7 +62,7 @@ export default function DBSCANPage() {
       const allPoints = [...clusterPoints, ...noisePoints]
 
       try {
-        const res = await fetch("${process.env.NEXT_PUBLIC_API_URL}/dbscan", {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/dbscan`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
