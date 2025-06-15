@@ -237,23 +237,51 @@ export default function PerceptronPage() {
     numOutputNeurons: number
   ) => {
     const connections = [];
+    const svgWidth = 100; // Assuming 100% width
+    const svgHeight = 100; // Assuming 100% height
+    const xOffset = (svgWidth / (totalLayers + 1)) * layerIndex + 10;
+    const nextXOffset = (svgWidth / (totalLayers + 1)) * (layerIndex + 1) + 10;
+
     for (let i = 0; i < numInputNeurons; i++) {
       for (let j = 0; j < numOutputNeurons; j++) {
         const weight = currentNetwork[layerIndex]?.weights[j]?.[i];
         if (weight !== undefined) {
           const opacity = Math.min(1, Math.abs(weight));
-          const color = weight > 0 ? "rgba(0, 255, 0," : "rgba(255, 0, 0,";
+          const color = weight > 0 ? "rgba(0, 255, 0," : "rgba(255, 0, 0,"; // Green for positive, Red for negative
+          const x1 = xOffset;
+          const y1 = (svgHeight / (numInputNeurons + 1)) * (i + 1);
+          const x2 = nextXOffset;
+          const y2 = (svgHeight / (numOutputNeurons + 1)) * (j + 1);
+
           connections.push(
             <line
               key={`conn-${layerIndex}-${i}-${j}`}
-              x1={`${(100 / (totalLayers + 1)) * layerIndex + 10}%`}
-              y1={`${(100 / (numInputNeurons + 1)) * (i + 1)}%`}
-              x2={`${(100 / (totalLayers + 1)) * (layerIndex + 1) + 10}%`}
-              y2={`${(100 / (numOutputNeurons + 1)) * (j + 1)}%`}
+              x1={`${x1}%`}
+              y1={`${y1}%`}
+              x2={`${x2}%`}
+              y2={`${y2}%`}
               stroke={`${color} ${opacity})`}
               strokeWidth={Math.max(0.5, Math.abs(weight) * 3)}
               className="transition-all duration-100 ease-in-out"
             />
+          );
+
+          // Add text for weight
+          const midX = (x1 + x2) / 2;
+          const midY = (y1 + y2) / 2;
+          connections.push(
+            <text
+              key={`weight-text-${layerIndex}-${i}-${j}`}
+              x={`${midX}%`}
+              y={`${midY}%`}
+              fill="white"
+              fontSize="8"
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="transition-all duration-100 ease-in-out"
+            >
+              {weight.toFixed(2)}
+            </text>
           );
         }
       }
@@ -263,8 +291,8 @@ export default function PerceptronPage() {
 
   const renderNeurons = (numNeurons: number, layerIndex: number) => {
     const neurons = [];
-    const fullActLayer = fullActivations?.[layerIndex * 2 + 1];
-    const activatedLayer = fullActivations?.[layerIndex * 2 + 2];
+    const fullActLayer = fullActivations?.[layerIndex * 2 + 1]; // Raw outputs (Z)
+    const activatedLayer = fullActivations?.[layerIndex * 2 + 2]; // Activated outputs (A)
 
     for (let i = 0; i < numNeurons; i++) {
       const bias = currentNetwork[layerIndex]?.biases?.[i];
@@ -272,28 +300,28 @@ export default function PerceptronPage() {
       const activatedOutput = activatedLayer?.[i];
       const delta = layerDeltas?.[layerIndex]?.[i];
 
+      const neuronYPos = (100 / (numNeurons + 1)) * (i + 1);
+
       neurons.push(
         <div
           key={`neuron-${layerIndex}-${i}`}
-          className="relative w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center text-xs text-white border-2 border-gray-500 shadow-md transform transition-all duration-100 ease-in-out"
+          className="relative w-12 h-12 bg-neutral-800 rounded-full flex items-center justify-center text-xs text-white border-2 border-neutral-700 shadow-md transform transition-all duration-100 ease-in-out"
           style={{
-            top: `${(100 / (numNeurons + 1)) * (i + 1)}%`,
+            top: `${neuronYPos}%`,
             left: "50%",
             transform: "translate(-50%, -50%)",
             backgroundColor: activatedOutput !== undefined
-                ? `rgba(100, 200, 255, ${Math.min(1, Math.abs(activatedOutput))})`
-                : 'gray',
+                ? `rgba(100, 200, 255, ${Math.min(1, Math.abs(activatedOutput))})` // Lighter blue for active
+                : 'rgb(82, 82, 82)', // Darker gray for inactive
             borderColor: delta !== undefined
-                ? (delta > 0 ? 'green' : 'red')
-                : 'gray',
+                ? (delta > 0 ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)') // Green for positive delta, red for negative
+                : 'rgb(100, 100, 100)', // Default border
             borderWidth: delta !== undefined
                 ? Math.max(1, Math.abs(delta) * 5)
                 : 2,
           }}
         >
-          {bias !== undefined && (
-            <span className="absolute -top-4 text-xs">B: {bias.toFixed(2)}</span>
-          )}
+          {/* Neuron Value Labels */}
           {rawOutput !== undefined && (
             <span className="absolute -left-10 text-xs">Z: {rawOutput.toFixed(2)}</span>
           )}
@@ -305,20 +333,37 @@ export default function PerceptronPage() {
           )}
         </div>
       );
+
+      // Separate circle for Bias
+      if (bias !== undefined) {
+        neurons.push(
+          <div
+            key={`bias-${layerIndex}-${i}`}
+            className="absolute w-6 h-6 bg-yellow-600 rounded-full flex items-center justify-center text-xs text-white border border-yellow-400"
+            style={{
+              top: `${neuronYPos}%`,
+              left: "calc(50% - 40px)", // Position to the left of the neuron
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            {bias.toFixed(2)}
+          </div>
+        );
+      }
     }
     return neurons;
   };
 
   const renderInputNeurons = (numNeurons: number) => {
     const neurons = [];
-    const inputLayerActivations = fullActivations?.[0];
+    const inputLayerActivations = fullActivations?.[0]; // Input values are the first "activations"
 
     for (let i = 0; i < numNeurons; i++) {
       const inputValue = inputLayerActivations?.[i];
       neurons.push(
         <div
           key={`input-neuron-${i}`}
-          className="relative w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-xs text-white border-2 border-blue-400 shadow-md"
+          className="relative w-12 h-12 bg-blue-900 rounded-full flex items-center justify-center text-xs text-white border-2 border-blue-700 shadow-md"
           style={{
             top: `${(100 / (numNeurons + 1)) * (i + 1)}%`,
             left: "50%",
@@ -338,7 +383,7 @@ export default function PerceptronPage() {
 
   const renderOutputNeurons = (numNeurons: number) => {
     const neurons = [];
-    const outputLayerActivations = fullActivations?.[(totalLayers * 2)];
+    const outputLayerActivations = fullActivations?.[(totalLayers * 2)]; // Last layer's activated output
 
     for (let i = 0; i < numNeurons; i++) {
       const activatedOutput = outputLayerActivations?.[i];
@@ -347,17 +392,17 @@ export default function PerceptronPage() {
       neurons.push(
         <div
           key={`output-neuron-${i}`}
-          className="relative w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center text-xs text-white border-2 border-purple-400 shadow-md transform transition-all duration-100 ease-in-out"
+          className="relative w-12 h-12 bg-purple-900 rounded-full flex items-center justify-center text-xs text-white border-2 border-purple-700 shadow-md transform transition-all duration-100 ease-in-out"
           style={{
             top: `${(100 / (numNeurons + 1)) * (i + 1)}%`,
             left: "50%",
             transform: "translate(-50%, -50%)",
             backgroundColor: activatedOutput !== undefined
-                ? `rgba(150, 50, 255, ${Math.min(1, Math.abs(activatedOutput))})`
-                : 'purple',
+                ? `rgba(150, 50, 255, ${Math.min(1, Math.abs(activatedOutput))})` // Lighter purple for active
+                : 'rgb(82, 82, 82)', // Darker gray for inactive
             borderColor: delta !== undefined
-                ? (delta > 0 ? 'green' : 'red')
-                : 'purple',
+                ? (delta > 0 ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)') // Green for positive delta, red for negative
+                : 'rgb(100, 100, 100)', // Default border
             borderWidth: delta !== undefined
                 ? Math.max(1, Math.abs(delta) * 5)
                 : 2,
@@ -388,7 +433,7 @@ export default function PerceptronPage() {
   }, [currentNetwork, trainingData, fullActivations, totalLayers]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-900 text-gray-100 font-sans p-4">
+    <div className="flex flex-col min-h-screen bg-black text-gray-100 font-sans p-4"> {/* Changed main bg to black */}
       <h1 className="text-4xl font-extrabold text-center text-blue-400 mb-8">
         MLP Visualizer
       </h1>
@@ -400,287 +445,8 @@ export default function PerceptronPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
-          <h2 className="text-2xl font-bold text-blue-300 mb-4">
-            Network Configuration
-          </h2>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="inputSize" className="block text-sm font-medium">
-                Input Neurons: {networkConfig.inputSize}
-              </label>
-              <input
-                type="range"
-                id="inputSize"
-                min="1"
-                max="10"
-                value={networkConfig.inputSize}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    inputSize: parseInt(e.target.value),
-                  })
-                }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="hiddenLayers" className="block text-sm font-medium">
-                Hidden Layers: {networkConfig.hiddenLayers}
-              </label>
-              <input
-                type="range"
-                id="hiddenLayers"
-                min="0"
-                max="5"
-                value={networkConfig.hiddenLayers}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    hiddenLayers: parseInt(e.target.value),
-                  })
-                }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="hiddenSize" className="block text-sm font-medium">
-                Neurons per Hidden Layer: {networkConfig.hiddenSize}
-              </label>
-              <input
-                type="range"
-                id="hiddenSize"
-                min="1"
-                max="10"
-                value={networkConfig.hiddenSize}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    hiddenSize: parseInt(e.target.value),
-                  })
-                }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="outputNodes" className="block text-sm font-medium">
-                Output Neurons: {networkConfig.outputNodes}
-              </label>
-              <input
-                type="range"
-                id="outputNodes"
-                min="1"
-                max="10"
-                value={networkConfig.outputNodes}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    outputNodes: parseInt(e.target.value),
-                  })
-                }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="learningRate" className="block text-sm font-medium">
-                Learning Rate: {networkConfig.learningRate.toFixed(3)}
-              </label>
-              <input
-                type="range"
-                id="learningRate"
-                min="0.001"
-                max="0.5"
-                step="0.001"
-                value={networkConfig.learningRate}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    learningRate: parseFloat(e.target.value),
-                  })
-                }
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-700"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="activation" className="block text-sm font-medium">
-                Hidden Activation:
-              </label>
-              <select
-                id="activation"
-                value={networkConfig.activation}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    activation: e.target.value as NetworkConfig["activation"],
-                  })
-                }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-gray-700 text-white"
-              >
-                {Object.keys(activations).map((key) => (
-                  <option key={key} value={key}>
-                    {activations[key].label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="outputActivation" className="block text-sm font-medium">
-                Output Activation:
-              </label>
-              <select
-                id="outputActivation"
-                value={networkConfig.outputActivation}
-                onChange={(e) =>
-                  setNetworkConfig({
-                    ...networkConfig,
-                    outputActivation: e.target.value as NetworkConfig["outputActivation"],
-                  })
-                }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-gray-700 text-white"
-              >
-                {Object.keys(activations).map((key) => (
-                  <option key={key} value={key}>
-                    {activations[key].label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              onClick={initializeNetwork}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-              disabled={isLoading || isTraining}
-            >
-              Reinitialize Network
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
-          <h2 className="text-2xl font-bold text-blue-300 mb-4">
-            Training Controls & Metrics
-          </h2>
-          <div className="space-y-4">
-            <button
-              onClick={isTraining ? stopTraining : startTraining}
-              className={`w-full font-bold py-2 px-4 rounded transition duration-200 ${
-                isTraining
-                  ? "bg-red-600 hover:bg-red-700"
-                  : "bg-blue-600 hover:bg-blue-700"
-              }`}
-              disabled={isLoading || !currentNetwork.length}
-            >
-              {isTraining ? "Stop Training" : "Start Training"}
-            </button>
-            <button
-              onClick={trainNetworkOneIteration}
-              className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-              disabled={isLoading || isTraining || !currentNetwork.length}
-            >
-              Train One Iteration
-            </button>
-            <button
-              onClick={generateRandomData}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-            >
-              Generate New Data
-            </button>
-            <div className="text-lg">
-              <strong>Iteration:</strong> {trainingIteration}
-            </div>
-            <div className="text-lg">
-              <strong>Current Error (MSE):</strong>{" "}
-              {trainingError !== null ? trainingError.toFixed(6) : "N/A"}
-            </div>
-            <h3 className="text-xl font-bold text-blue-200 mt-6">
-              Error History
-            </h3>
-            <div className="max-h-48 overflow-y-auto bg-gray-700 p-3 rounded">
-              <ul className="text-sm">
-                {totalErrorHistory.slice(-20).map((error, idx) => (
-                  <li key={idx} className="mb-1">
-                    Iteration {trainingIteration - (totalErrorHistory.length - idx) + 1}: {error.toFixed(6)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
-          <h2 className="text-2xl font-bold text-blue-300 mb-4">
-            Activation Formulas
-          </h2>
-          <div className="space-y-4">
-            {Object.keys(activations).map((key) => (
-              <div key={key}>
-                <h3 className="text-xl font-semibold text-blue-200">
-                  {activations[key].label}
-                </h3>
-                <BlockMath math={activations[key].formula} />
-                <p className="text-sm mt-2">
-                  Derivative:{" "}
-                  <BlockMath
-                    math={
-                      key === "softmax"
-                        ? "f'(y) = y(1-y) \\quad \\text{(Simplified for MSE)}"
-                        : activations[key].derivative.toString().replace("(_: number) => ", "").replace("(y: number) => ", "")
-                    }
-                  />
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-gray-800 p-6 rounded-lg shadow-xl">
-          <div className="space-y-4">
-            <h3 className="text-2xl font-semibold text-white">What is a Perceptron?</h3>
-            <p className="text-gray-300">
-              A perceptron is the simplest artificial neural network for binary classification,
-              computing a weighted sum plus bias and applying an activation function.
-            </p>
-            <h3 className="text-xl font-semibold text-white">Formula</h3>
-            <BlockMath math="y = \\phi\\left(\\sum_i w_i x_i + b\\right)" />
-            <h3 className="text-xl font-semibold text-white">Activation Functions</h3>
-            {Object.entries(activations).map(([key, { label, formula }]) => (
-              <div key={key} className="text-gray-300">
-                <strong>{label}:</strong>
-                <BlockMath math={formula} />
-              </div>
-            ))}
-            <h3 className="text-xl font-semibold text-white">Data Types</h3>
-            <ul className="list-disc list-inside text-gray-300">
-              <li>Binary inputs</li>
-              <li>Continuous features</li>
-              <li>Labels {"{-1,+1}"} or {"{0,1}"}</li>
-            </ul>
-            <h3 className="text-xl font-semibold text-white">Controls</h3>
-            <p className="text-gray-300">
-              <strong>Hidden Layers:</strong> Depth (0–5)<br />
-              <strong>Iterations:</strong> Epochs<br />
-              <strong>Learning Rate:</strong> Step size<br />
-              <strong>Output Nodes:</strong> Number of outputs<br />
-              <strong>Activation:</strong> Sigmoid, ReLU, Identity, or Softmax
-            </p>
-            <h3 className="text-xl font-semibold text-white">Applications</h3>
-            <ul className="list-disc list-inside text-gray-300">
-              <li>Linearly separable classification</li>
-              <li>Feature detection</li>
-              <li>Base for deep networks</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-grow bg-gray-800 p-6 rounded-lg shadow-xl relative min-h-[400px]">
+      {/* Network Visualization (Canvas) - Bigger and on top */}
+      <div className="bg-neutral-900 p-6 rounded-lg shadow-xl relative h-[700px] mb-8"> {/* Increased height */}
         <h2 className="text-2xl font-bold text-blue-300 mb-4 text-center">
           Network Visualization
         </h2>
@@ -738,21 +504,302 @@ export default function PerceptronPage() {
           </div>
         </div>
       </div>
-      
-      <div className="bg-gray-800 p-6 rounded-lg shadow-xl mt-6">
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8"> {/* Container for controls and text */}
+        {/* Controls Column */}
+        <div className="flex flex-col gap-6">
+          <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
+            <h2 className="text-2xl font-bold text-blue-300 mb-4">
+              Network Configuration
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="inputSize" className="block text-sm font-medium">
+                  Input Neurons: {networkConfig.inputSize}
+                </label>
+                <input
+                  type="range"
+                  id="inputSize"
+                  min="1"
+                  max="10"
+                  value={networkConfig.inputSize}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      inputSize: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="hiddenLayers" className="block text-sm font-medium">
+                  Hidden Layers: {networkConfig.hiddenLayers}
+                </label>
+                <input
+                  type="range"
+                  id="hiddenLayers"
+                  min="0"
+                  max="5"
+                  value={networkConfig.hiddenLayers}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      hiddenLayers: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="hiddenSize" className="block text-sm font-medium">
+                  Neurons per Hidden Layer: {networkConfig.hiddenSize}
+                </label>
+                <input
+                  type="range"
+                  id="hiddenSize"
+                  min="1"
+                  max="10"
+                  value={networkConfig.hiddenSize}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      hiddenSize: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="outputNodes" className="block text-sm font-medium">
+                  Output Neurons: {networkConfig.outputNodes}
+                </label>
+                <input
+                  type="range"
+                  id="outputNodes"
+                  min="1"
+                  max="10"
+                  value={networkConfig.outputNodes}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      outputNodes: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="learningRate" className="block text-sm font-medium">
+                  Learning Rate: {networkConfig.learningRate.toFixed(3)}
+                </label>
+                <input
+                  type="range"
+                  id="learningRate"
+                  min="0.001"
+                  max="0.5"
+                  step="0.001"
+                  value={networkConfig.learningRate}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      learningRate: parseFloat(e.target.value),
+                    })
+                  }
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="activation" className="block text-sm font-medium">
+                  Hidden Activation:
+                </label>
+                <select
+                  id="activation"
+                  value={networkConfig.activation}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      activation: e.target.value as NetworkConfig["activation"],
+                    })
+                  }
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-neutral-700 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-neutral-800 text-white"
+                >
+                  {Object.keys(activations).map((key) => (
+                    <option key={key} value={key}>
+                      {activations[key].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="outputActivation" className="block text-sm font-medium">
+                  Output Activation:
+                </label>
+                <select
+                  id="outputActivation"
+                  value={networkConfig.outputActivation}
+                  onChange={(e) =>
+                    setNetworkConfig({
+                      ...networkConfig,
+                      outputActivation: e.target.value as NetworkConfig["outputActivation"],
+                    })
+                  }
+                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-neutral-700 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-neutral-800 text-white"
+                >
+                  {Object.keys(activations).map((key) => (
+                    <option key={key} value={key}>
+                      {activations[key].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={initializeNetwork}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+                disabled={isLoading || isTraining}
+              >
+                Reinitialize Network
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
+            <h2 className="text-2xl font-bold text-blue-300 mb-4">
+              Training Controls & Metrics
+            </h2>
+            <div className="space-y-4">
+              <button
+                onClick={isTraining ? stopTraining : startTraining}
+                className={`w-full font-bold py-2 px-4 rounded transition duration-200 ${
+                  isTraining
+                    ? "bg-red-600 hover:bg-red-700"
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+                disabled={isLoading || !currentNetwork.length}
+              >
+                {isTraining ? "Stop Training" : "Start Training"}
+              </button>
+              <button
+                onClick={trainNetworkOneIteration}
+                className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+                disabled={isLoading || isTraining || !currentNetwork.length}
+              >
+                Train One Iteration
+              </button>
+              <button
+                onClick={generateRandomData}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+              >
+                Generate New Data
+              </button>
+              <div className="text-lg">
+                <strong>Iteration:</strong> {trainingIteration}
+              </div>
+              <div className="text-lg">
+                <strong>Current Error (MSE):</strong>{" "}
+                {trainingError !== null ? trainingError.toFixed(6) : "N/A"}
+              </div>
+              <h3 className="text-xl font-bold text-blue-200 mt-6">
+                Error History
+              </h3>
+              <div className="max-h-48 overflow-y-auto bg-neutral-800 p-3 rounded">
+                <ul className="text-sm">
+                  {totalErrorHistory.slice(-20).map((error, idx) => (
+                    <li key={idx} className="mb-1">
+                      Iteration {trainingIteration - (totalErrorHistory.length - idx) + 1}: {error.toFixed(6)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Text Column */}
+        <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
+          <div className="space-y-4">
+            <h3 className="text-2xl font-semibold text-white">What is a Perceptron?</h3>
+            <p className="text-gray-300">
+              A perceptron is the simplest artificial neural network for binary classification,
+              computing a weighted sum plus bias and applying an activation function.
+            </p>
+            <h3 className="text-xl font-semibold text-white">Formula</h3>
+            <BlockMath math="y = \\phi\\left(\\sum_i w_i x_i + b\\right)" />
+            <h3 className="text-xl font-semibold text-white">Activation Functions</h3>
+            {Object.entries(activations).map(([key, { label, formula }]) => (
+              <div key={key} className="text-gray-300">
+                <strong>{label}:</strong>
+                <BlockMath math={formula} />
+              </div>
+            ))}
+            <h3 className="text-xl font-semibold text-white">Data Types</h3>
+            <ul className="list-disc list-inside text-gray-300">
+              <li>Binary inputs</li>
+              <li>Continuous features</li>
+              <li>Labels {"{-1,+1}"} or {"{0,1}"}</li>
+            </ul>
+            <h3 className="text-xl font-semibold text-white">Controls</h3>
+            <p className="text-gray-300">
+              <strong>Hidden Layers:</strong> Depth (0–5)<br />
+              <strong>Iterations:</strong> Epochs<br />
+              <strong>Learning Rate:</strong> Step size<br />
+              <strong>Output Nodes:</strong> Number of outputs<br />
+              <strong>Activation:</strong> Sigmoid, ReLU, Identity, or Softmax
+            </p>
+            <h3 className="text-xl font-semibold text-white">Applications</h3>
+            <ul className="list-disc list-inside text-gray-300">
+              <li>Linearly separable classification</li>
+              <li>Feature detection</li>
+              <li>Base for deep networks</li>
+            </ul>
+            <h2 className="text-2xl font-bold text-blue-300 mb-4">
+              Activation Formulas
+            </h2>
+            <div className="space-y-4">
+            {Object.keys(activations).map((key) => (
+              <div key={key}>
+                <h3 className="text-xl font-semibold text-blue-200">
+                  {activations[key].label}
+                </h3>
+                <BlockMath math={activations[key].formula} />
+                <p className="text-sm mt-2">
+                  Derivative:{" "}
+                  <BlockMath
+                    math={
+                      key === "softmax"
+                        ? "f'(y) = y(1-y) \\quad \\text{(Simplified for MSE)}"
+                        : activations[key].derivative.toString().replace("(_: number) => ", "").replace("(y: number) => ", "")
+                    }
+                  />
+                </p>
+              </div>
+            ))}
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-neutral-900 p-6 rounded-lg shadow-xl mt-6">
         <h2 className="text-2xl font-bold text-blue-300 mb-4 text-center">
           Network Weights and Biases
         </h2>
         <div className="space-y-6">
           {currentNetwork.map((layer, index) => (
-            <div key={index} className="bg-gray-700 p-4 rounded-lg">
+            <div key={index} className="bg-neutral-800 p-4 rounded-lg">
               <h3 className="text-xl font-semibold text-blue-200 mb-3">
                 Layer {index + 1} ({index === totalLayers - 1 ? "Output" : "Hidden"})
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <h4 className="text-lg font-medium mb-2">Weights:</h4>
-                  <div className="max-h-48 overflow-y-auto bg-gray-600 p-2 rounded text-sm">
+                  <div className="max-h-48 overflow-y-auto bg-neutral-700 p-2 rounded text-sm">
                     {layer.weights.map((row, rIdx) => (
                       <div key={rIdx} className="whitespace-pre">
                         [{row.map((w) => w.toFixed(4)).join(", ")}]
@@ -762,7 +809,7 @@ export default function PerceptronPage() {
                 </div>
                 <div>
                   <h4 className="text-lg font-medium mb-2">Biases:</h4>
-                  <div className="max-h-48 overflow-y-auto bg-gray-600 p-2 rounded text-sm">
+                  <div className="max-h-48 overflow-y-auto bg-neutral-700 p-2 rounded text-sm">
                     [{layer.biases.map((b) => b.toFixed(4)).join(", ")}]
                   </div>
                 </div>
