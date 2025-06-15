@@ -13,7 +13,7 @@ export default function AboutPage() {
   </p>
 
   <p className="text-lg mb-6">
-    From linear regression to neural networks, each visual is designed to help you explore how the algorithm works by tweaking parameters and seeing the results instantly.
+    From linear regression to ensemble learning, each visual is designed to help you explore how the algorithm works by tweaking parameters and seeing the results instantly.
   </p>
 
   <h2 className="text-2xl font-bold mt-12 mb-4">How It Works</h2>
