@@ -7,6 +7,7 @@ import "katex/dist/katex.min.css";
 type Layer = { weights: number[][]; biases: number[] };
 
 interface NetworkConfig {
+  modelType: "custom" | "sklearn";
   inputSize: number;
   hiddenSize: number;
   outputNodes: number;
@@ -49,799 +50,323 @@ const activations: Activations = {
   softmax: {
     label: "Softmax",
     func: (x: number) => {
-      return Math.exp(x) / (1 + Math.exp(x));
+      console.warn("Softmax activation expects an array, applying to single value might not be intended.");
+      const expX = Math.exp(x);
+      return expX / (expX + 1);
     },
-    derivative: (y: number) => y * (1 - y),
+    derivative: (_: number) => 1,
     formula: "\\text{Softmax}(x_i) = \\frac{e^{x_i}}{\\sum_j e^{x_j}}",
   },
 };
 
-export default function PerceptronPage() {
-  const [networkConfig, setNetworkConfig] = useState<NetworkConfig>({
-    inputSize: 2,
-    hiddenSize: 4,
-    outputNodes: 1,
-    hiddenLayers: 1,
-    activation: "sigmoid",
-    outputActivation: "sigmoid",
-    learningRate: 0.1,
-  });
+const initialNetworkConfig: NetworkConfig = {
+  modelType: "custom",
+  inputSize: 2,
+  hiddenSize: 4,
+  outputNodes: 1,
+  hiddenLayers: 1,
+  activation: "sigmoid",
+  outputActivation: "sigmoid",
+  learningRate: 0.1,
+};
 
-  const [currentNetwork, setCurrentNetwork] = useState<Layer[]>([]);
-  const [trainingData, setTrainingData] = useState<{
-    input: number[][];
-    target: number[][];
-  }>({ input: [], target: [] });
-  const [trainingError, setTrainingError] = useState<number | null>(null);
-  const [trainingAccuracy, setTrainingAccuracy] = useState<number | null>(null);
+const MIN_NODES = 1;
+const MAX_NODES = 10;
+const MIN_HIDDEN_SIZE = 1;
+const MAX_HIDDEN_SIZE = 20;
+
+const NODE_RADIUS = 15;
+const LAYER_SPACING = 150;
+const NODE_SPACING = 50;
+
+export default function Perceptron() {
+  const [networkConfig, setNetworkConfig] = useState<NetworkConfig>(initialNetworkConfig);
+  const [network, setNetwork] = useState<Layer[] | null>(null);
+  const [inputData, setInputData] = useState<number[]>([]);
+  const [targetData, setTargetData] = useState<number[]>([]);
+  const [trainError, setTrainError] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isTraining, setIsTraining] = useState(false);
-  const [trainingIteration, setTrainingIteration] = useState(0);
-  const [totalErrorHistory, setTotalErrorHistory] = useState<number[]>([]);
-  const [layerDeltas, setLayerDeltas] = useState<number[][]>([]);
-  const [fullActivations, setFullActivations] = useState<number[][]>([]);
-  const animationFrameId = useRef<number | null>(null);
 
-  const totalLayers = networkConfig.hiddenLayers + 1;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const generateRandomData = useCallback(() => {
-    const numSamples = 50;
-    const input = Array(numSamples)
-      .fill(0)
-      .map(() => [Math.random() * 2 - 1, Math.random() * 2 - 1]);
-    const target = input.map(([x, y]) =>
-      x > 0 && y > 0 ? [1] : x < 0 && y < 0 ? [1] : [0]
-    );
-    setTrainingData({ input, target });
-  }, []);
+  const networkStructure = useMemo(() => {
+    if (!network) return [];
 
-  useEffect(() => {
-    generateRandomData();
-  }, [generateRandomData]);
+    const structure = [];
+
+    structure.push({ type: 'input', nodes: networkConfig.inputSize });
+
+    if (networkConfig.modelType === "custom") {
+      for (let i = 0; i < networkConfig.hiddenLayers; i++) {
+          const layerIndexInNetworkState = i;
+          if (network[layerIndexInNetworkState]) {
+            structure.push({ type: 'hidden', nodes: networkConfig.hiddenSize });
+          }
+      }
+    }
+    structure.push({ type: 'output', nodes: networkConfig.outputNodes });
+
+    return structure;
+  }, [network, networkConfig.inputSize, networkConfig.hiddenLayers, networkConfig.outputNodes, networkConfig.modelType]);
+
 
   const initializeNetwork = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        "https://ml-vis-lbhl.onrender.com/initialize",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(networkConfig),
-        }
-      );
+      const response = await fetch("https://ml-vis-lbhl.onrender.com/initialize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ config: networkConfig }),
+      });
+
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(`Network response was not ok: ${errorData.detail || response.statusText}`);
+        throw new Error(errorData.detail || "Failed to initialize network.");
       }
-      const data: Layer[] = await response.json();
-      setCurrentNetwork(data);
-      setTrainingError(null);
-      setTrainingAccuracy(null);
-      setTotalErrorHistory([]);
-      setTrainingIteration(0);
-      setLayerDeltas([]);
-      setFullActivations([]);
+
+      const initializedNetwork: Layer[] = await response.json();
+      setNetwork(initializedNetwork);
+      setTrainError(null);
     } catch (err: any) {
-      console.error("Error initializing network:", err);
-      setError(`Error initializing network: ${err.message}`);
+      console.error("Initialization error:", err);
+      setError(err.message || "Failed to initialize network.");
     } finally {
       setIsLoading(false);
     }
   }, [networkConfig]);
 
+  const trainNetwork = useCallback(async () => {
+    if (!network || inputData.length === 0 || targetData.length === 0) {
+      setError("Please initialize network and set input/target data.");
+      return;
+    }
+
+    try {
+      const classes = networkConfig.modelType === "sklearn" ? [0, 1] : undefined;
+
+      const response = await fetch("https://ml-vis-lbhl.onrender.com/train", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          config: networkConfig,
+          network: network,
+          input: [inputData],
+          target: [targetData],
+          classes: classes,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to train network.");
+      }
+
+      const result: { network: Layer[]; error: number; message?: string } = await response.json();
+      setNetwork(result.network);
+      setTrainError(result.error);
+    } catch (err: any) {
+      console.error("Training error:", err);
+      setTrainError(null);
+      setError(err.message || "Failed to train network.");
+    }
+  }, [network, networkConfig, inputData, targetData]);
+
   useEffect(() => {
     initializeNetwork();
   }, [initializeNetwork]);
 
-  const trainNetworkOneIteration = useCallback(async () => {
-    setError(null);
-    if (!currentNetwork.length || !trainingData.input.length) {
-      setError("Network or training data not initialized.");
-      return;
-    }
-
-    const randomIndex = Math.floor(Math.random() * trainingData.input.length);
-    const inputSample = trainingData.input[randomIndex];
-    const targetSample = trainingData.target[randomIndex];
-
-    try {
-      const response = await fetch("https://ml-vis-lbhl.onrender.com/train", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: [inputSample],
-          target: [targetSample],
-          network: currentNetwork,
-          config: networkConfig,
-        }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Network response was not ok: ${errorData.detail || response.statusText}`);
-      }
-      const data = await response.json();
-      setCurrentNetwork(data.network);
-      setTrainingError(data.error);
-      setTrainingAccuracy(data.accuracy);
-      setTrainingIteration((prev) => prev + 1);
-      setTotalErrorHistory((prev) => [...prev, data.error]);
-      setLayerDeltas(data.deltas || []);
-      setFullActivations(data.full_activations || []);
-    } catch (err: any) {
-      console.error("Error training network:", err);
-      setError(`Error training network: ${err.message}`);
-      setIsTraining(false);
-    }
-  }, [currentNetwork, trainingData, networkConfig]);
-
-  const startTraining = useCallback(() => {
-    if (isTraining) return;
-    setIsTraining(true);
-    const animate = () => {
-      trainNetworkOneIteration();
-      animationFrameId.current = requestAnimationFrame(animate);
-    };
-    animationFrameId.current = requestAnimationFrame(animate);
-  }, [isTraining, trainNetworkOneIteration]);
-
-  const stopTraining = useCallback(() => {
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-    }
-    setIsTraining(false);
-  }, []);
 
   useEffect(() => {
-    return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
-    };
-  }, []);
+    const canvas = canvasRef.current;
+    if (!canvas || !network) return;
 
-  const getLayerOutput = useCallback(
-    (input: number[], layerIndex: number, network: Layer[]) => {
-      let currentInput = input;
-      for (let i = 0; i <= layerIndex; i++) {
-        const layer = network[i];
-        const weights = layer.weights;
-        const biases = layer.biases;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-        const rawOutput = weights.map((row) => {
-          return row.reduce(
-            (sum, weight, idx) => sum + weight * currentInput[idx],
-            0
-          );
-        });
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const layerActivationName =
-          i === totalLayers - 1
-            ? networkConfig.outputActivation
-            : networkConfig.activation;
+    const totalLayers = networkStructure.length;
+    const maxNodesInAnyLayer = Math.max(...networkStructure.map(layer => layer.nodes));
 
-        currentInput = rawOutput.map((val) =>
-          activations[layerActivationName].func(val)
-        );
-      }
-      return currentInput;
-    },
-    [activations, networkConfig.activation, networkConfig.outputActivation, totalLayers]
-  );
+    const drawingWidth = (totalLayers - 1) * LAYER_SPACING + NODE_RADIUS * 2;
+    const drawingHeight = maxNodesInAnyLayer * NODE_SPACING;
 
-  const renderNeuronConnections = (
-    layerIndex: number,
-    numInputNeurons: number,
-    numOutputNeurons: number
-  ) => {
-    const connections = [];
-    const svgWidth = 100; // Assuming 100% width
-    const svgHeight = 100; // Assuming 100% height
-    const xOffset = (svgWidth / (totalLayers + 1)) * layerIndex + 10;
-    const nextXOffset = (svgWidth / (totalLayers + 1)) * (layerIndex + 1) + 10;
+    const startX = (canvas.width - drawingWidth) / 2;
+    const startY = (canvas.height - drawingHeight) / 2;
 
-    for (let i = 0; i < numInputNeurons; i++) {
-      for (let j = 0; j < numOutputNeurons; j++) {
-        const weight = currentNetwork[layerIndex]?.weights[j]?.[i];
-        if (weight !== undefined) {
-          const opacity = Math.min(1, Math.abs(weight));
-          const color = weight > 0 ? "rgba(0, 255, 0," : "rgba(255, 0, 0,"; // Green for positive, Red for negative
-          const x1 = xOffset;
-          const y1 = (svgHeight / (numInputNeurons + 1)) * (i + 1);
-          const x2 = nextXOffset;
-          const y2 = (svgHeight / (numOutputNeurons + 1)) * (j + 1);
-
-          connections.push(
-            <line
-              key={`conn-${layerIndex}-${i}-${j}`}
-              x1={`${x1}%`}
-              y1={`${y1}%`}
-              x2={`${x2}%`}
-              y2={`${y2}%`}
-              stroke={`${color} ${opacity})`}
-              strokeWidth={Math.max(0.5, Math.abs(weight) * 3)}
-              className="transition-all duration-100 ease-in-out"
-            />
-          );
-
-          // Add text for weight
-          const midX = (x1 + x2) / 2;
-          const midY = (y1 + y2) / 2;
-          connections.push(
-            <text
-              key={`weight-text-${layerIndex}-${i}-${j}`}
-              x={`${midX}%`}
-              y={`${midY}%`}
-              fill="white"
-              fontSize="8"
-              textAnchor="middle"
-              dominantBaseline="central"
-              className="transition-all duration-100 ease-in-out"
-            >
-              {weight.toFixed(2)}
-            </text>
-          );
+    const getActivations = async () => {
+        if (!inputData.length || !network) return null;
+        try {
+            const response = await fetch("https://ml-vis-lbhl.onrender.com/predict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    config: networkConfig,
+                    network: network,
+                    input: inputData
+                })
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Failed to get predictions.");
+            }
+            const result = await response.json();
+            return result.activations;
+        } catch (err) {
+            console.error("Prediction error:", err);
+            return null;
         }
-      }
+    };
+
+
+    let currentLayerX = startX;
+    const layerPositions: { x: number, y: number[] }[] = [];
+
+    networkStructure.forEach((layerInfo, layerIndex) => {
+        const numNodes = layerInfo.nodes;
+        const layerHeight = numNodes * NODE_SPACING;
+        const layerStartY = startY + (drawingHeight - layerHeight) / 2;
+
+        const nodePositionsY: number[] = [];
+
+        for (let i = 0; i < numNodes; i++) {
+            const nodeX = currentLayerX + NODE_RADIUS;
+            const nodeY = layerStartY + i * NODE_SPACING + NODE_RADIUS;
+            nodePositionsY.push(nodeY);
+
+            ctx.beginPath();
+            ctx.arc(nodeX, nodeY, NODE_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = layerInfo.type === 'input' ? '#4CAF50' : (layerInfo.type === 'output' ? '#F44336' : '#2196F3');
+            ctx.fill();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '12px Arial';
+            let label = '';
+            if (layerInfo.type === 'input') {
+                label = inputData[i] !== undefined ? inputData[i].toFixed(1) : 'Input';
+            }
+            ctx.fillText(label, nodeX, nodeY);
+        }
+        layerPositions.push({ x: currentLayerX + NODE_RADIUS, y: nodePositionsY });
+        currentLayerX += LAYER_SPACING;
+    });
+
+    for (let i = 0; i < layerPositions.length - 1; i++) {
+        const currentLayer = layerPositions[i];
+        const nextLayer = layerPositions[i + 1];
+
+        const weights = network[i]?.weights;
+
+        if (weights) {
+            for (let j = 0; j < currentLayer.y.length; j++) {
+                for (let k = 0; k < nextLayer.y.length; k++) {
+                    const weight = weights[k]?.[j];
+
+                    if (weight !== undefined) {
+                        ctx.beginPath();
+                        ctx.moveTo(currentLayer.x + NODE_RADIUS, currentLayer.y[j]);
+                        ctx.lineTo(nextLayer.x - NODE_RADIUS, nextLayer.y[k]);
+
+                        ctx.strokeStyle = weight > 0 ? '#0F0' : (weight < 0 ? '#F00' : '#888');
+                        ctx.lineWidth = Math.min(Math.abs(weight) * 2 + 0.5, 5);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
     }
-    return connections;
+  }, [network, inputData, networkConfig, networkStructure]);
+
+
+  const renderActivationDetails = (activationType: "activation" | "outputActivation") => {
+    const act = activations[networkConfig[activationType]];
+    return (
+      <div className="activation-details">
+        <h4>{activationType === "activation" ? "Hidden Layer Activation" : "Output Layer Activation"}</h4>
+        <p>Name: {act.label}</p>
+        <p>Formula:</p>
+        <BlockMath math={act.formula} />
+      </div>
+    );
   };
-
-  const renderNeurons = (numNeurons: number, layerIndex: number) => {
-    const neurons = [];
-    const fullActLayer = fullActivations?.[layerIndex * 2 + 1]; // Raw outputs (Z)
-    const activatedLayer = fullActivations?.[layerIndex * 2 + 2]; // Activated outputs (A)
-
-    for (let i = 0; i < numNeurons; i++) {
-      const bias = currentNetwork[layerIndex]?.biases?.[i];
-      const rawOutput = fullActLayer?.[i];
-      const activatedOutput = activatedLayer?.[i];
-      const delta = layerDeltas?.[layerIndex]?.[i];
-
-      const neuronYPos = (100 / (numNeurons + 1)) * (i + 1);
-
-      neurons.push(
-        <div
-          key={`neuron-${layerIndex}-${i}`}
-          className="relative w-12 h-12 bg-neutral-800 rounded-full flex items-center justify-center text-xs text-white border-2 border-neutral-700 shadow-md transform transition-all duration-100 ease-in-out"
-          style={{
-            top: `${neuronYPos}%`,
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            backgroundColor: activatedOutput !== undefined
-                ? `rgba(100, 200, 255, ${Math.min(1, Math.abs(activatedOutput))})` // Lighter blue for active
-                : 'rgb(82, 82, 82)', // Darker gray for inactive
-            borderColor: delta !== undefined
-                ? (delta > 0 ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)') // Green for positive delta, red for negative
-                : 'rgb(100, 100, 100)', // Default border
-            borderWidth: delta !== undefined
-                ? Math.max(1, Math.abs(delta) * 5)
-                : 2,
-          }}
-        >
-          {/* Neuron Value Labels */}
-          {rawOutput !== undefined && (
-            <span className="absolute -left-10 text-xs">Z: {rawOutput.toFixed(2)}</span>
-          )}
-          {activatedOutput !== undefined && (
-            <span className="absolute -right-10 text-xs">A: {activatedOutput.toFixed(2)}</span>
-          )}
-          {delta !== undefined && (
-            <span className="absolute -bottom-4 text-xs">Δ: {delta.toFixed(2)}</span>
-          )}
-        </div>
-      );
-
-      // Separate circle for Bias
-      if (bias !== undefined) {
-        neurons.push(
-          <div
-            key={`bias-${layerIndex}-${i}`}
-            className="absolute w-6 h-6 bg-yellow-600 rounded-full flex items-center justify-center text-xs text-white border border-yellow-400"
-            style={{
-              top: `${neuronYPos}%`,
-              left: "calc(50% - 40px)", // Position to the left of the neuron
-              transform: "translate(-50%, -50%)",
-            }}
-          >
-            {bias.toFixed(2)}
-          </div>
-        );
-      }
-    }
-    return neurons;
-  };
-
-  const renderInputNeurons = (numNeurons: number) => {
-    const neurons = [];
-    const inputLayerActivations = fullActivations?.[0]; // Input values are the first "activations"
-
-    for (let i = 0; i < numNeurons; i++) {
-      const inputValue = inputLayerActivations?.[i];
-      neurons.push(
-        <div
-          key={`input-neuron-${i}`}
-          className="relative w-12 h-12 bg-blue-900 rounded-full flex items-center justify-center text-xs text-white border-2 border-blue-700 shadow-md"
-          style={{
-            top: `${(100 / (numNeurons + 1)) * (i + 1)}%`,
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-          }}
-        >
-          {inputValue !== undefined && (
-            <span className="absolute inset-0 flex items-center justify-center">
-              X{i + 1}: {inputValue.toFixed(2)}
-            </span>
-          )}
-        </div>
-      );
-    }
-    return neurons;
-  };
-
-  const renderOutputNeurons = (numNeurons: number) => {
-    const neurons = [];
-    const outputLayerActivations = fullActivations?.[(totalLayers * 2)]; // Last layer's activated output
-
-    for (let i = 0; i < numNeurons; i++) {
-      const activatedOutput = outputLayerActivations?.[i];
-      const delta = layerDeltas?.[totalLayers - 1]?.[i];
-
-      neurons.push(
-        <div
-          key={`output-neuron-${i}`}
-          className="relative w-12 h-12 bg-purple-900 rounded-full flex items-center justify-center text-xs text-white border-2 border-purple-700 shadow-md transform transition-all duration-100 ease-in-out"
-          style={{
-            top: `${(100 / (numNeurons + 1)) * (i + 1)}%`,
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            backgroundColor: activatedOutput !== undefined
-                ? `rgba(150, 50, 255, ${Math.min(1, Math.abs(activatedOutput))})` // Lighter purple for active
-                : 'rgb(82, 82, 82)', // Darker gray for inactive
-            borderColor: delta !== undefined
-                ? (delta > 0 ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)') // Green for positive delta, red for negative
-                : 'rgb(100, 100, 100)', // Default border
-            borderWidth: delta !== undefined
-                ? Math.max(1, Math.abs(delta) * 5)
-                : 2,
-          }}
-        >
-          {activatedOutput !== undefined && (
-            <span className="absolute inset-0 flex items-center justify-center">
-              Y{i + 1}: {activatedOutput.toFixed(2)}
-            </span>
-          )}
-          {delta !== undefined && (
-            <span className="absolute -bottom-4 text-xs">Δ: {delta.toFixed(2)}</span>
-          )}
-        </div>
-      );
-    }
-    return neurons;
-  };
-
-  const currentOutput = useMemo(() => {
-    if (currentNetwork.length && trainingData.input.length) {
-      const lastActivation = fullActivations?.[(totalLayers * 2)];
-      if (lastActivation) {
-        return lastActivation;
-      }
-    }
-    return [];
-  }, [currentNetwork, trainingData, fullActivations, totalLayers]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-black text-gray-100 font-sans p-4"> {/* Changed main bg to black */}
-      <h1 className="text-4xl font-extrabold text-center text-blue-400 mb-8">
-        MLP Visualizer
-      </h1>
-
-      {error && <div className="text-red-500 text-center mb-4">{error}</div>}
-      {isLoading && (
-        <div className="text-blue-300 text-center mb-4">
-          Initializing Network...
-        </div>
-      )}
-
-      {/* Network Visualization (Canvas) - Bigger and on top */}
-      <div className="bg-neutral-900 p-6 rounded-lg shadow-xl relative h-[700px] mb-8"> {/* Increased height */}
-        <h2 className="text-2xl font-bold text-blue-300 mb-4 text-center">
-          Network Visualization
-        </h2>
-        <svg
-          className="absolute inset-0 w-full h-full"
-          style={{ overflow: "visible" }}
-        >
-          {currentNetwork.map((layer, layerIndex) => {
-            const numInputNeurons =
-              layerIndex === 0
-                ? networkConfig.inputSize
-                : networkConfig.hiddenSize;
-            const numOutputNeurons =
-              layerIndex === totalLayers - 1
-                ? networkConfig.outputNodes
-                : networkConfig.hiddenSize;
-            return renderNeuronConnections(
-              layerIndex,
-              numInputNeurons,
-              numOutputNeurons
-            );
-          })}
-        </svg>
-
-        <div className="flex justify-around items-center h-full">
-          <div
-            className="flex flex-col justify-around items-center h-full relative"
-            style={{ flexBasis: "10%" }}
-          >
-            <div className="text-lg font-semibold absolute -top-8">Input</div>
-            {renderInputNeurons(networkConfig.inputSize)}
-          </div>
-
-          {Array.from({ length: networkConfig.hiddenLayers }).map(
-            (_, layerIndex) => (
-              <div
-                key={`hidden-layer-${layerIndex}`}
-                className="flex flex-col justify-around items-center h-full relative"
-                style={{ flexBasis: `${80 / totalLayers}%` }}
-              >
-                <div className="text-lg font-semibold absolute -top-8">
-                  Hidden {layerIndex + 1}
-                </div>
-                {renderNeurons(networkConfig.hiddenSize, layerIndex)}
-              </div>
-            )
-          )}
-
-          <div
-            className="flex flex-col justify-around items-center h-full relative"
-            style={{ flexBasis: "10%" }}
-          >
-            <div className="text-lg font-semibold absolute -top-8">Output</div>
-            {renderOutputNeurons(networkConfig.outputNodes)}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8"> {/* Container for controls and text */}
-        {/* Controls Column */}
-        <div className="flex flex-col gap-6">
-          <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
-            <h2 className="text-2xl font-bold text-blue-300 mb-4">
-              Network Configuration
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="inputSize" className="block text-sm font-medium">
-                  Input Neurons: {networkConfig.inputSize}
-                </label>
-                <input
-                  type="range"
-                  id="inputSize"
-                  min="1"
-                  max="10"
-                  value={networkConfig.inputSize}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      inputSize: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="hiddenLayers" className="block text-sm font-medium">
-                  Hidden Layers: {networkConfig.hiddenLayers}
-                </label>
-                <input
-                  type="range"
-                  id="hiddenLayers"
-                  min="0"
-                  max="5"
-                  value={networkConfig.hiddenLayers}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      hiddenLayers: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="hiddenSize" className="block text-sm font-medium">
-                  Neurons per Hidden Layer: {networkConfig.hiddenSize}
-                </label>
-                <input
-                  type="range"
-                  id="hiddenSize"
-                  min="1"
-                  max="10"
-                  value={networkConfig.hiddenSize}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      hiddenSize: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="outputNodes" className="block text-sm font-medium">
-                  Output Neurons: {networkConfig.outputNodes}
-                </label>
-                <input
-                  type="range"
-                  id="outputNodes"
-                  min="1"
-                  max="10"
-                  value={networkConfig.outputNodes}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      outputNodes: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="learningRate" className="block text-sm font-medium">
-                  Learning Rate: {networkConfig.learningRate.toFixed(3)}
-                </label>
-                <input
-                  type="range"
-                  id="learningRate"
-                  min="0.001"
-                  max="0.5"
-                  step="0.001"
-                  value={networkConfig.learningRate}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      learningRate: parseFloat(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-neutral-800"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="activation" className="block text-sm font-medium">
-                  Hidden Activation:
-                </label>
-                <select
-                  id="activation"
-                  value={networkConfig.activation}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      activation: e.target.value as NetworkConfig["activation"],
-                    })
-                  }
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-neutral-700 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-neutral-800 text-white"
-                >
-                  {Object.keys(activations).map((key) => (
-                    <option key={key} value={key}>
-                      {activations[key].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="outputActivation" className="block text-sm font-medium">
-                  Output Activation:
-                </label>
-                <select
-                  id="outputActivation"
-                  value={networkConfig.outputActivation}
-                  onChange={(e) =>
-                    setNetworkConfig({
-                      ...networkConfig,
-                      outputActivation: e.target.value as NetworkConfig["outputActivation"],
-                    })
-                  }
-                  className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-neutral-700 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-neutral-800 text-white"
-                >
-                  {Object.keys(activations).map((key) => (
-                    <option key={key} value={key}>
-                      {activations[key].label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={initializeNetwork}
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-                disabled={isLoading || isTraining}
-              >
-                Reinitialize Network
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
-            <h2 className="text-2xl font-bold text-blue-300 mb-4">
-              Training Controls & Metrics
-            </h2>
-            <div className="space-y-4">
-              <button
-                onClick={isTraining ? stopTraining : startTraining}
-                className={`w-full font-bold py-2 px-4 rounded transition duration-200 ${
-                  isTraining
-                    ? "bg-red-600 hover:bg-red-700"
-                    : "bg-blue-600 hover:bg-blue-700"
-                }`}
-                disabled={isLoading || !currentNetwork.length}
-              >
-                {isTraining ? "Stop Training" : "Start Training"}
-              </button>
-              <button
-                onClick={trainNetworkOneIteration}
-                className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-                disabled={isLoading || isTraining || !currentNetwork.length}
-              >
-                Train One Iteration
-              </button>
-              <button
-                onClick={generateRandomData}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-200"
-              >
-                Generate New Data
-              </button>
-              <div className="text-lg">
-                <strong>Iteration:</strong> {trainingIteration}
-              </div>
-              <div className="text-lg">
-                <strong>Current Error (MSE):</strong>{" "}
-                {trainingError !== null ? trainingError.toFixed(6) : "N/A"}
-              </div>
-              <h3 className="text-xl font-bold text-blue-200 mt-6">
-                Error History
-              </h3>
-              <div className="max-h-48 overflow-y-auto bg-neutral-800 p-3 rounded">
-                <ul className="text-sm">
-                  {totalErrorHistory.slice(-20).map((error, idx) => (
-                    <li key={idx} className="mb-1">
-                      Iteration {trainingIteration - (totalErrorHistory.length - idx) + 1}: {error.toFixed(6)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Text Column */}
-        <div className="bg-neutral-900 p-6 rounded-lg shadow-xl">
-          <div className="space-y-4">
-            <h3 className="text-2xl font-semibold text-white">What is a Perceptron?</h3>
-            <p className="text-gray-300">
-              A perceptron is the simplest artificial neural network for binary classification,
-              computing a weighted sum plus bias and applying an activation function.
-            </p>
-            <h3 className="text-xl font-semibold text-white">Formula</h3>
-            <BlockMath math="y = \\phi\\left(\\sum_i w_i x_i + b\\right)" />
-            <h3 className="text-xl font-semibold text-white">Activation Functions</h3>
-            {Object.entries(activations).map(([key, { label, formula }]) => (
-              <div key={key} className="text-gray-300">
-                <strong>{label}:</strong>
-                <BlockMath math={formula} />
-              </div>
-            ))}
-            <h3 className="text-xl font-semibold text-white">Data Types</h3>
-            <ul className="list-disc list-inside text-gray-300">
-              <li>Binary inputs</li>
-              <li>Continuous features</li>
-              <li>Labels {"{-1,+1}"} or {"{0,1}"}</li>
-            </ul>
-            <h3 className="text-xl font-semibold text-white">Controls</h3>
-            <p className="text-gray-300">
-              <strong>Hidden Layers:</strong> Depth (0–5)<br />
-              <strong>Iterations:</strong> Epochs<br />
-              <strong>Learning Rate:</strong> Step size<br />
-              <strong>Output Nodes:</strong> Number of outputs<br />
-              <strong>Activation:</strong> Sigmoid, ReLU, Identity, or Softmax
-            </p>
-            <h3 className="text-xl font-semibold text-white">Applications</h3>
-            <ul className="list-disc list-inside text-gray-300">
-              <li>Linearly separable classification</li>
-              <li>Feature detection</li>
-              <li>Base for deep networks</li>
-            </ul>
-            <h2 className="text-2xl font-bold text-blue-300 mb-4">
-              Activation Formulas
-            </h2>
-            <div className="space-y-4">
-            {Object.keys(activations).map((key) => (
-              <div key={key}>
-                <h3 className="text-xl font-semibold text-blue-200">
-                  {activations[key].label}
-                </h3>
-                <BlockMath math={activations[key].formula} />
-                <p className="text-sm mt-2">
-                  Derivative:{" "}
-                  <BlockMath
-                    math={
-                      key === "softmax"
-                        ? "f'(y) = y(1-y) \\quad \\text{(Simplified for MSE)}"
-                        : activations[key].derivative.toString().replace("(_: number) => ", "").replace("(y: number) => ", "")
-                    }
-                  />
-                </p>
-              </div>
-            ))}
-          </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-neutral-900 p-6 rounded-lg shadow-xl mt-6">
-        <h2 className="text-2xl font-bold text-blue-300 mb-4 text-center">
-          Network Weights and Biases
-        </h2>
-        <div className="space-y-6">
-          {currentNetwork.map((layer, index) => (
-            <div key={index} className="bg-neutral-800 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold text-blue-200 mb-3">
-                Layer {index + 1} ({index === totalLayers - 1 ? "Output" : "Hidden"})
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h4 className="text-lg font-medium mb-2">Weights:</h4>
-                  <div className="max-h-48 overflow-y-auto bg-neutral-700 p-2 rounded text-sm">
-                    {layer.weights.map((row, rIdx) => (
-                      <div key={rIdx} className="whitespace-pre">
-                        [{row.map((w) => w.toFixed(4)).join(", ")}]
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-lg font-medium mb-2">Biases:</h4>
-                  <div className="max-h-48 overflow-y-auto bg-neutral-700 p-2 rounded text-sm">
-                    [{layer.biases.map((b) => b.toFixed(4)).join(", ")}]
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="container">
       <style jsx global>{`
-        .controls-section {
-          margin-top: 1.5rem;
-          width: 100%;
-          max-width: 800px;
-          margin-left: auto;
-          margin-right: auto;
+        body {
+          margin: 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+            "Segoe UI Symbol";
+          background-color: #1a1a1a;
+          color: white;
         }
-        .control-row {
+
+        .container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 2rem;
+          min-height: 100vh;
+          background-color: #1a1a1a;
+        }
+
+        .header {
+          text-align: center;
+          margin-bottom: 2rem;
+        }
+
+        .main-content {
+          display: flex;
+          flex-direction: row;
+          gap: 2rem;
+          width: 100%;
+          max-width: 1200px;
+          justify-content: center;
+        }
+
+        .controls-panel {
+          flex: 0 0 300px;
+          background-color: #2a2a2a;
+          padding: 1.5rem;
+          border-radius: 8px;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+          display: flex;
+          flex-direction: column;
+          gap: 1.2rem;
+        }
+
+        .control-group {
           display: flex;
           align-items: center;
-          margin-bottom: 1rem;
+          justify-content: space-between;
+          margin-bottom: 0.5rem;
         }
-        .control-label {
-          width: 150px;
-          color: white;
-          font-weight: 500;
+
+        .control-group label {
+          font-weight: bold;
+          white-space: nowrap;
+          margin-right: 1rem;
         }
+
         .control-value {
           width: 40px;
           text-align: right;
           color: white;
           margin-left: 0.5rem;
         }
+
         .slider {
           -webkit-appearance: none;
           appearance: none;
@@ -856,10 +381,9 @@ export default function PerceptronPage() {
             #333333 100%
           );
           margin: 0 0.75rem;
+          outline: none;
         }
-        .slider::-moz-range-track {
-          background: transparent;
-        }
+
         .slider::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
@@ -871,6 +395,7 @@ export default function PerceptronPage() {
           margin-top: -5px;
           cursor: pointer;
         }
+
         .slider::-moz-range-thumb {
           width: 18px;
           height: 18px;
@@ -879,21 +404,402 @@ export default function PerceptronPage() {
           border: 2px solid white;
           cursor: pointer;
         }
+        
+        .slider::-ms-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ff3860;
+            border: 2px solid white;
+            cursor: pointer;
+        }
 
         .styled-select {
           flex: 1;
           margin: 0 0.75rem;
-          padding: 6px 8px;
-          background: #222;
-          color: white;
-          border: 1px solid #555;
-          border-radius: 4px;
-          appearance: none;
+          position: relative;
         }
-        .styled-select::-ms-expand {
-          display: none;
+
+        .styled-select select {
+          width: 100%;
+          padding: 0.5rem 1rem;
+          border-radius: 4px;
+          background-color: #333;
+          color: white;
+          border: 1px solid #ff3860;
+          appearance: none;
+          -webkit-appearance: none;
+          cursor: pointer;
+          font-size: 1rem;
+        }
+
+        .styled-select::after {
+          content: '▼';
+          position: absolute;
+          right: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: white;
+          pointer-events: none;
+        }
+
+        .data-input-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .data-input-group input {
+          padding: 0.5rem;
+          border-radius: 4px;
+          border: 1px solid #333;
+          background-color: #444;
+          color: white;
+        }
+
+        .buttons {
+          display: flex;
+          gap: 1rem;
+          margin-top: 1.5rem;
+          justify-content: center;
+        }
+
+        .buttons button {
+          padding: 0.75rem 1.5rem;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 1rem;
+          font-weight: bold;
+          transition: background-color 0.2s ease;
+        }
+
+        .buttons button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .buttons .train-button {
+          background-color: #ff3860;
+          color: white;
+        }
+
+        .buttons .train-button:hover:not(:disabled) {
+          background-color: #e02f52;
+        }
+
+        .buttons .reset-button {
+          background-color: #555;
+          color: white;
+        }
+
+        .buttons .reset-button:hover:not(:disabled) {
+          background-color: #777;
+        }
+
+        .visualization-panel {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          background-color: #2a2a2a;
+          padding: 1.5rem;
+          border-radius: 8px;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        canvas {
+          background-color: #1a1a1a;
+          border-radius: 8px;
+          box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+          margin-bottom: 1.5rem;
+        }
+
+        .info-box {
+          background-color: #3a3a3a;
+          padding: 1rem;
+          border-radius: 6px;
+          width: 100%;
+          margin-top: 1rem;
+        }
+
+        .info-box p {
+          margin: 0.5rem 0;
+          color: #bbb;
+        }
+
+        .error-message {
+          color: #ff6b6b;
+          background-color: #3a1a1a;
+          padding: 0.75rem;
+          border-radius: 4px;
+          margin-top: 1rem;
+          text-align: center;
+        }
+
+        .loading-message {
+          color: #6bb0ff;
+          margin-top: 1rem;
+          text-align: center;
+        }
+
+        .activation-details {
+            background-color: #3a3a3a;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+            width: 100%;
+        }
+        .activation-details h4 {
+            margin-top: 0;
+            color: #ff3860;
+        }
+        .activation-details p {
+            margin: 0.5rem 0;
+            color: #bbb;
+        }
+        .activation-details .katex {
+            font-size: 1.2rem;
+            color: #eee;
+        }
+        .note {
+            font-size: 0.85rem;
+            color: #aaa;
+            margin-top: 0.5rem;
+            padding: 0 1rem;
         }
       `}</style>
+
+      <header className="header">
+        <h1>Perceptron Visualizer</h1>
+      </header>
+
+      <div className="main-content">
+        <div className="controls-panel">
+          <h2>Network Configuration</h2>
+
+          <div className="control-group">
+            <label>Model Type:</label>
+            <div className="styled-select">
+              <select
+                value={networkConfig.modelType}
+                onChange={(e) =>
+                  setNetworkConfig((prev) => ({
+                    ...prev,
+                    modelType: e.target.value as "custom" | "sklearn",
+                  }))
+                }
+              >
+                <option value="custom">Custom Perceptron (MLP)</option>
+                <option value="sklearn">Sklearn Perceptron</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="control-group">
+            <label>Input Nodes:</label>
+            <input
+              type="range"
+              min={MIN_NODES}
+              max={MAX_NODES}
+              value={networkConfig.inputSize}
+              onChange={(e) =>
+                setNetworkConfig((prev) => ({
+                  ...prev,
+                  inputSize: parseInt(e.target.value),
+                }))
+              }
+              className="slider"
+              style={{ "--value": `${((networkConfig.inputSize - MIN_NODES) / (MAX_NODES - MIN_NODES)) * 100}%` } as React.CSSProperties}
+            />
+            <span className="control-value">{networkConfig.inputSize}</span>
+          </div>
+
+          {networkConfig.modelType === "custom" && (
+            <>
+              <div className="control-group">
+                <label>Hidden Layers:</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="5"
+                  value={networkConfig.hiddenLayers}
+                  onChange={(e) =>
+                    setNetworkConfig((prev) => ({
+                      ...prev,
+                      hiddenLayers: parseInt(e.target.value),
+                    }))
+                  }
+                  className="slider"
+                  style={{ "--value": `${(networkConfig.hiddenLayers / 5) * 100}%` } as React.CSSProperties}
+                />
+                <span className="control-value">{networkConfig.hiddenLayers}</span>
+              </div>
+
+              <div className="control-group">
+                <label>Hidden Size:</label>
+                <input
+                  type="range"
+                  min={MIN_HIDDEN_SIZE}
+                  max={MAX_HIDDEN_SIZE}
+                  value={networkConfig.hiddenSize}
+                  onChange={(e) =>
+                    setNetworkConfig((prev) => ({
+                      ...prev,
+                      hiddenSize: parseInt(e.target.value),
+                    }))
+                  }
+                  className="slider"
+                  style={{ "--value": `${((networkConfig.hiddenSize - MIN_HIDDEN_SIZE) / (MAX_HIDDEN_SIZE - MIN_HIDDEN_SIZE)) * 100}%` } as React.CSSProperties}
+                />
+                <span className="control-value">{networkConfig.hiddenSize}</span>
+              </div>
+            </>
+          )}
+
+          <div className="control-group">
+            <label>Output Nodes:</label>
+            <input
+              type="range"
+              min={MIN_NODES}
+              max={MAX_NODES}
+              value={networkConfig.outputNodes}
+              onChange={(e) =>
+                setNetworkConfig((prev) => ({
+                  ...prev,
+                  outputNodes: parseInt(e.target.value),
+                }))
+              }
+              className="slider"
+              style={{ "--value": `${((networkConfig.outputNodes - MIN_NODES) / (MAX_NODES - MIN_NODES)) * 100}%` } as React.CSSProperties}
+            />
+            <span className="control-value">{networkConfig.outputNodes}</span>
+          </div>
+
+          {networkConfig.modelType === "custom" && (
+            <div className="control-group">
+              <label>Hidden Activation:</label>
+              <div className="styled-select">
+                <select
+                  value={networkConfig.activation}
+                  onChange={(e) =>
+                    setNetworkConfig((prev) => ({
+                      ...prev,
+                      activation: e.target.value as NetworkConfig["activation"],
+                    }))
+                  }
+                >
+                  {Object.keys(activations).map((key) => (
+                    <option key={key} value={key}>
+                      {activations[key].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="control-group">
+            <label>Output Activation:</label>
+            <div className="styled-select">
+              <select
+                value={networkConfig.outputActivation}
+                onChange={(e) =>
+                  setNetworkConfig((prev) => ({
+                    ...prev,
+                    outputActivation: e.target.value as NetworkConfig["outputActivation"],
+                  }))
+                }
+              >
+                {Object.keys(activations).map((key) => (
+                  <option key={key} value={key}>
+                    {activations[key].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="control-group">
+            <label>Learning Rate:</label>
+            <input
+              type="range"
+              min="0.001"
+              max="1.0"
+              step="0.001"
+              value={networkConfig.learningRate}
+              onChange={(e) =>
+                setNetworkConfig((prev) => ({
+                  ...prev,
+                  learningRate: parseFloat(e.target.value),
+                }))
+              }
+              className="slider"
+              style={{ "--value": `${(networkConfig.learningRate / 1.0) * 100}%` } as React.CSSProperties}
+            />
+            <span className="control-value">{networkConfig.learningRate.toFixed(3)}</span>
+          </div>
+
+          {networkConfig.modelType === "sklearn" && (
+            <p className="note">
+              *Sklearn Perceptron is a single-layer binary classifier. Sklearn MLPClassifier supports hidden layers.
+              Output activation will be applied for display purposes only if using Sklearn Perceptron.
+            </p>
+          )}
+
+          <hr style={{ borderColor: '#444' }}/>
+
+          <h2>Data Input</h2>
+          <div className="data-input-group">
+            <label>Input Data (comma-separated):</label>
+            <input
+              type="text"
+              value={inputData.join(',')}
+              onChange={(e) => setInputData(e.target.value.split(',').map(Number))}
+              placeholder="e.g., 0.5, 0.8"
+            />
+          </div>
+          <div className="data-input-group">
+            <label>Target Data (comma-separated):</label>
+            <input
+              type="text"
+              value={targetData.join(',')}
+              onChange={(e) => setTargetData(e.target.value.split(',').map(Number))}
+              placeholder="e.g., 0.1"
+            />
+          </div>
+
+          <div className="buttons">
+            <button onClick={trainNetwork} disabled={isLoading || !network} className="train-button">
+              {isLoading ? "Training..." : "Train One Step"}
+            </button>
+            <button onClick={initializeNetwork} disabled={isLoading} className="reset-button">
+              Reset Network
+            </button>
+          </div>
+
+          {isLoading && <p className="loading-message">Initializing Network...</p>}
+          {error && <p className="error-message">Error: {error}</p>}
+          {trainError !== null && (
+            <div className="info-box">
+              <p>Last Train MSE: {trainError.toFixed(6)}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="visualization-panel">
+          <h2>Network Visualization</h2>
+          <canvas
+            ref={canvasRef}
+            width={700}
+            height={500}
+            style={{ border: '1px solid #ff3860' }}
+          ></canvas>
+
+          {networkConfig.modelType === "custom" && renderActivationDetails("activation")}
+          {renderActivationDetails("outputActivation")}
+        </div>
+      </div>
     </div>
   );
 }
